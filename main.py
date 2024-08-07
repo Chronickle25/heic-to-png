@@ -2,9 +2,12 @@ import os
 from PIL import Image
 import pillow_heif
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import tkinter as tk
+from tkinter import filedialog, messagebox
+from tkinter.ttk import Progressbar, Style
 
-# Función para convertir un archivo HEIC a PNG
 def convert_heic_to_png(filepath, png_directory):
+    """Convert a HEIC file to PNG format."""
     filename = os.path.basename(filepath)
     new_filename = os.path.splitext(filename)[0] + ".png"
     new_filepath = os.path.join(png_directory, new_filename)
@@ -18,33 +21,87 @@ def convert_heic_to_png(filepath, png_directory):
             "raw",
         )
         image.save(new_filepath, format="png")
-        return f"Imagen guardada como: {new_filepath}"
+        return True, f"Imagen guardada como: {new_filepath}"
     except Exception as e:
-        return f"Error al convertir {filename}: {e}"
+        return False, f"Error al convertir {filename}: {e}"
 
-# Solicita la ruta del directorio que contiene las imágenes HEIC
-directory = input("Introduce la ruta del directorio que contiene las imágenes HEIC: ").strip()
+def select_directory():
+    """Open a dialog to select the directory containing HEIC images."""
+    directory = filedialog.askdirectory()
+    if directory:
+        entry_directory.delete(0, tk.END)
+        entry_directory.insert(0, directory)
 
-# Verifica que el directorio exista
-if not os.path.isdir(directory):
-    print("El directorio especificado no existe.")
-    exit()
+def create_png_directory(directory):
+    """Create a directory to store PNG images if it doesn't exist."""
+    png_directory = os.path.join(directory, 'png_images')
+    if not os.path.exists(png_directory):
+        os.makedirs(png_directory)
+    return png_directory
 
-png_directory = os.path.join(directory, 'png_images')
+def get_heic_files(directory):
+    """Get a list of HEIC files in the specified directory."""
+    return [os.path.join(directory, filename) for filename in os.listdir(directory) if filename.lower().endswith(".heic")]
 
-# Crea el directorio para las imágenes PNG si no existe
-if not os.path.exists(png_directory):
-    os.makedirs(png_directory)
+def process_files_in_parallel(directory, progressbar):
+    """Process HEIC files in parallel and update the progress bar."""
+    png_directory = create_png_directory(directory)
+    heic_files = get_heic_files(directory)
+    if not heic_files:
+        messagebox.showinfo("Información", "No se encontraron archivos HEIC en el directorio especificado.")
+        return
 
-# Obtiene una lista de archivos HEIC en el directorio
-heic_files = [os.path.join(directory, filename) for filename in os.listdir(directory) if filename.lower().endswith(".heic")]
+    progressbar["maximum"] = len(heic_files)
+    progressbar["value"] = 0
+    progressbar.pack(pady=10)
 
-# Usa ThreadPoolExecutor para procesar archivos en paralelo
-with ThreadPoolExecutor() as executor:
-    # Crea un diccionario de futuros
-    future_to_file = {executor.submit(convert_heic_to_png, filepath, png_directory): filepath for filepath in heic_files}
+    with ThreadPoolExecutor() as executor:
+        future_to_file = {executor.submit(convert_heic_to_png, filepath, png_directory): filepath for filepath in heic_files}
+        for future in as_completed(future_to_file):
+            success, message = future.result()
+            progressbar["value"] += 1
+            root.update_idletasks()
+            if not success:
+                messagebox.showerror("Error", message)
+                return
 
-    # Imprime los resultados a medida que se completan
-    for future in as_completed(future_to_file):
-        result = future.result()
-        print(result)
+    progressbar.pack_forget()
+    messagebox.showinfo("Información", "Procesamiento completado.")
+
+def start_conversion():
+    """Start the conversion process."""
+    directory = entry_directory.get().strip()
+    if not os.path.isdir(directory):
+        messagebox.showerror("Error", "El directorio especificado no existe.")
+        return
+
+    process_files_in_parallel(directory, progressbar)
+
+# Configuración de la interfaz gráfica
+root = tk.Tk()
+root.title("Conversor de HEIC a PNG")
+root.geometry("500x100")
+root.resizable(False, False)
+
+style = Style(root)
+style.configure("TProgressbar", thickness=20)
+
+frame = tk.Frame(root, pady=10, padx=10)
+frame.pack(fill=tk.BOTH, expand=True)
+
+label_directory = tk.Label(frame, text="Directorio de imágenes HEIC:")
+label_directory.grid(row=0, column=0, padx=5, pady=5, sticky="e")
+
+entry_directory = tk.Entry(frame, width=40)
+entry_directory.grid(row=0, column=1, padx=5, pady=5)
+
+button_browse = tk.Button(frame, text="Examinar", command=select_directory)
+button_browse.grid(row=0, column=2, padx=5, pady=5)
+
+button_convert = tk.Button(root, text="Convertir a PNG", command=start_conversion, height=2, width=20)
+button_convert.pack(pady=10)
+
+progressbar = Progressbar(root, orient=tk.HORIZONTAL, mode='determinate', length=400)
+
+# Iniciar la aplicación
+root.mainloop()
